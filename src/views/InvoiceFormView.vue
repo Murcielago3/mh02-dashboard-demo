@@ -1,0 +1,1341 @@
+<template>
+  <AppLayout>
+    <!-- Page Header -->
+    <div class="page-header">
+      <div class="header-left">
+        <button class="back-btn" @click="$router.push('/admin/invoices')">
+          <span class="material-symbols-outlined">arrow_back</span>
+        </button>
+        <div>
+          <h1 class="page-title">{{ isEditing ? 'Edit Invoice' : 'Create Invoice' }}</h1>
+          <p class="page-subtitle">{{ isEditing ? 'Update the invoice details below' : 'Fill in the details below to generate a new invoice' }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="invoice-layout">
+      <!-- ── Main Form ── -->
+      <div class="form-card">
+        <form @submit.prevent="submitInvoice" id="invoiceForm">
+
+          <!-- Section: Invoice Type -->
+          <div class="form-section">
+            <div class="section-header">
+              <span class="section-number">01</span>
+              <h3 class="section-title">Invoice Type</h3>
+            </div>
+            <div class="type-toggles">
+              <button
+                type="button"
+                class="type-btn"
+                :class="{ active: form.invoice_type === 'tax' }"
+                @click="form.invoice_type = 'tax'"
+              >
+                <span class="material-symbols-outlined type-icon">receipt</span>
+                <span class="type-label">TAX INVOICE</span>
+              </button>
+              <button
+                type="button"
+                class="type-btn"
+                :class="{ active: form.invoice_type === 'proforma' }"
+                @click="form.invoice_type = 'proforma'"
+              >
+                <span class="material-symbols-outlined type-icon">draft</span>
+                <span class="type-label">PROFORMA INVOICE</span>
+              </button>
+            </div>
+            <div v-if="form.invoice_type === 'tax'" class="form-group mt-16">
+              <label>Invoice Number {{ taxType === 'IGST' ? '(Optional)' : '*' }}</label>
+              <input v-model="form.invoice_number" type="text" placeholder="e.g. AO-006" :required="taxType !== 'IGST'" />
+            </div>
+          </div>
+
+          <!-- Section: Date & Place -->
+          <div class="form-section">
+            <div class="section-header">
+              <span class="section-number">02</span>
+              <h3 class="section-title">Date &amp; Location</h3>
+            </div>
+            <div class="row-2">
+              <div class="form-group">
+                <label>Invoice Date *</label>
+                <input v-model="form.invoice_date" type="date" required />
+              </div>
+              <div class="form-group">
+                <label>Place of Supply</label>
+                <input v-model="form.place_of_supply" type="text" placeholder="e.g. Maharashtra" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: Project -->
+          <div class="form-section">
+            <div class="section-header">
+              <span class="section-number">03</span>
+              <h3 class="section-title">Project</h3>
+            </div>
+            <div class="form-group">
+              <label>Project *</label>
+              <select v-model="projectSel" @change="onProjectSelect" required>
+                <option :value="null">Select Project</option>
+                <option v-for="p in projects" :key="p.id" :value="p.id">
+                  {{ p.project_number }} - {{ p.name }}
+                </option>
+                <option value="custom">✎ Enter project name manually…</option>
+              </select>
+            </div>
+            <div v-if="isCustomProject" class="form-group mt-12">
+              <label>Project name *</label>
+              <input
+                v-model="customProjectName"
+                @input="onCustomNameInput"
+                type="text"
+                placeholder="Type the project name"
+              />
+              <p class="custom-proj-note">
+                <span class="material-symbols-outlined">info</span>
+                A one-off invoice not linked to any project — nothing is calculated from it.
+              </p>
+            </div>
+            <div v-if="selectedClient" class="client-chip mt-12">
+              <span class="material-symbols-outlined chip-icon">{{ selectedClient.customer_type === 'individual' ? 'person' : 'corporate_fare' }}</span>
+              <span v-if="selectedClient.customer_type === 'individual'">
+                <strong>{{ selectedClient.salutation || selectedClient.name }}</strong> &nbsp;·&nbsp; PAN: {{ selectedClient.pan || 'N/A' }}
+              </span>
+              <span v-else>
+                <strong>{{ selectedClient.salutation || selectedClient.name }}</strong> &nbsp;·&nbsp; GSTIN: {{ selectedClient.gstin || 'N/A' }}
+              </span>
+            </div>
+            <div v-if="taxTypeIndicator" class="tax-badge mt-8" :class="taxTypeIndicator.class">
+              <span class="material-symbols-outlined" style="font-size:14px;">info</span>
+              {{ taxTypeIndicator.text }}
+            </div>
+
+            <!-- Subject (auto = project name, or custom) -->
+            <div class="form-group mt-16">
+              <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer; font-weight:500;">
+                <input type="checkbox" v-model="includeProjectAsSubject" style="width:auto; margin:0;" />
+                <span>Include project name as subject</span>
+              </label>
+              <input
+                v-model="form.subject"
+                type="text"
+                placeholder="Invoice subject"
+                :disabled="includeProjectAsSubject"
+              />
+            </div>
+          </div>
+
+          <!-- Section: Billing Details -->
+          <div class="form-section">
+            <div class="section-header">
+              <span class="section-number">04</span>
+              <h3 class="section-title">Billing Details</h3>
+            </div>
+            <div class="billing-grid">
+              <div>
+                <div class="col-label">Bill To</div>
+                <div class="form-group">
+                  <label>Name *</label>
+                  <input v-model="form.bill_to_name" type="text" required />
+                </div>
+                <div class="form-group">
+                  <label>Address</label>
+                  <textarea v-model="form.bill_to_address" rows="3" placeholder="Full address…"></textarea>
+                </div>
+                <div class="form-group">
+                  <label>Bill against</label>
+                  <div class="idtype-toggle" role="group" aria-label="Bill against GSTIN or PAN">
+                    <button type="button" :class="{ active: billIdType === 'gstin' }" @click="setBillIdType('gstin')">GSTIN</button>
+                    <button type="button" :class="{ active: billIdType === 'pan' }" @click="setBillIdType('pan')">PAN</button>
+                  </div>
+                </div>
+                <div v-if="billIdType === 'gstin'" class="form-group">
+                  <label>GSTIN</label>
+                  <TaxIdField v-model="form.bill_to_gstin" kind="gstin" placeholder="e.g. 27XXXXX…" />
+                </div>
+                <div v-else class="form-group">
+                  <label>PAN</label>
+                  <TaxIdField v-model="form.bill_to_pan" kind="pan" placeholder="e.g. AAAAA9999A" />
+                  <p class="idtype-hint">
+                    <span class="material-symbols-outlined">info</span>
+                    No GSTIN - taxed as CGST + SGST, never IGST.
+                  </p>
+                </div>
+              </div>
+              <div>
+                <div class="col-label col-label--flex">
+                  Ship To
+                  <label class="same-as-label">
+                    <input type="checkbox" v-model="sameAsBillTo" @change="handleSameAsChange" />
+                    Same as Bill To
+                  </label>
+                </div>
+                <div class="form-group">
+                  <label>Name</label>
+                  <input v-model="form.ship_to_name" type="text" :disabled="sameAsBillTo" />
+                </div>
+                <div class="form-group">
+                  <label>Address</label>
+                  <textarea v-model="form.ship_to_address" rows="3" :disabled="sameAsBillTo"></textarea>
+                </div>
+                <div class="form-group">
+                  <label>GSTIN</label>
+                  <input v-model="form.ship_to_gstin" type="text" :disabled="sameAsBillTo" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: Line Items -->
+          <div class="form-section">
+            <div class="section-header">
+              <span class="section-number">05</span>
+              <h3 class="section-title">Line Items</h3>
+            </div>
+            <div class="bulk-tax-bar">
+              <span class="bulk-tax-label">Bulk-apply GST bracket:</span>
+              <select v-model.number="bulkTaxRate" class="bulk-tax-select">
+                <option :value="8">8%</option>
+                <option :value="12">12%</option>
+                <option :value="18">18%</option>
+              </select>
+              <button type="button" class="bulk-tax-btn" @click="applyBulkTaxRate">Apply to All</button>
+            </div>
+            <div class="items-table-wrap">
+              <table class="items-table">
+                <thead>
+                  <tr>
+                    <th style="width:36px">#</th>
+                    <th>Description</th>
+                    <th style="width:100px">HSN/SAC</th>
+                    <th style="width:80px">GST %</th>
+                    <th style="width:140px">Amount (₹)</th>
+                    <th style="width:40px"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(item, idx) in form.items" :key="idx" class="item-row">
+                    <td class="idx-cell">{{ idx + 1 }}</td>
+                    <td>
+                      <input v-model="item.description" type="text" required placeholder="Item description" />
+                    </td>
+                    <td>
+                      <input v-model="item.hsn_sac" type="text" placeholder="HSN" />
+                    </td>
+                    <td>
+                      <select v-model.number="item.tax_rate">
+                        <option :value="8">8%</option>
+                        <option :value="12">12%</option>
+                        <option :value="18">18%</option>
+                      </select>
+                    </td>
+                    <td>
+                      <CurrencyInput v-model="item.amount" required />
+                    </td>
+                    <td class="text-center">
+                      <button type="button" class="remove-btn" @click="removeItem(idx)" :disabled="form.items.length <= 1">
+                        <span class="material-symbols-outlined">close</span>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <button type="button" class="add-item-btn" @click="addItem">
+              <span class="material-symbols-outlined">add</span>
+              Add Item
+            </button>
+          </div>
+
+          <!-- Section: Bank Account -->
+          <div class="form-section" style="border-bottom: none; padding-bottom: 0; margin-bottom: 0;">
+            <div class="section-header">
+              <span class="section-number">06</span>
+              <h3 class="section-title">Bank Account</h3>
+            </div>
+            <div v-if="bankAccounts.length === 0" class="bank-warning">
+              <span class="material-symbols-outlined">warning</span>
+              No bank accounts saved.
+              <router-link to="/admin/settings/bank">Add bank account →</router-link>
+            </div>
+            <div v-else class="form-group">
+              <label>Select Account</label>
+              <select v-model="form.bank_account_id">
+                <option :value="null">Select Bank Account</option>
+                <option v-for="b in bankAccounts" :key="b.id" :value="b.id">
+                  {{ b.bank_name }} - {{ b.account_number }} ({{ b.account_holder_name }})
+                </option>
+              </select>
+            </div>
+          </div>
+
+        </form>
+      </div>
+
+      <!-- ── Sidebar Summary ── -->
+      <div class="form-sidebar">
+        <div class="summary-card">
+          <h3 class="summary-title">Summary</h3>
+
+          <div class="summary-rows">
+            <div class="summary-row">
+              <span class="sr-label">Sub Total</span>
+              <span class="sr-value font-mono">₹{{ formatAmount(liveTotals.subtotal) }}</span>
+            </div>
+            <!-- Single bracket: same compact look as before, but rate-aware -->
+            <template v-if="liveTotals.breakdown.length <= 1">
+              <template v-if="taxType === 'CGST_SGST'">
+                <div class="summary-row">
+                  <span class="sr-label">CGST ({{ singleBracketRate / 2 }}%)</span>
+                  <span class="sr-value font-mono">₹{{ formatAmount(liveTotals.cgst) }}</span>
+                </div>
+                <div class="summary-row">
+                  <span class="sr-label">SGST ({{ singleBracketRate / 2 }}%)</span>
+                  <span class="sr-value font-mono">₹{{ formatAmount(liveTotals.sgst) }}</span>
+                </div>
+              </template>
+              <div v-else class="summary-row">
+                <span class="sr-label">IGST ({{ singleBracketRate }}%)</span>
+                <span class="sr-value font-mono">₹{{ formatAmount(liveTotals.igst) }}</span>
+              </div>
+            </template>
+            <!-- Multiple brackets: one line (or CGST+SGST pair) per rate -->
+            <template v-else>
+              <template v-for="b in liveTotals.breakdown" :key="b.rate">
+                <template v-if="taxType === 'CGST_SGST'">
+                  <div class="summary-row">
+                    <span class="sr-label">CGST ({{ b.rate / 2 }}%) on ₹{{ formatAmount(b.taxable_value) }}</span>
+                    <span class="sr-value font-mono">₹{{ formatAmount(b.cgst) }}</span>
+                  </div>
+                  <div class="summary-row">
+                    <span class="sr-label">SGST ({{ b.rate / 2 }}%) on ₹{{ formatAmount(b.taxable_value) }}</span>
+                    <span class="sr-value font-mono">₹{{ formatAmount(b.sgst) }}</span>
+                  </div>
+                </template>
+                <div v-else class="summary-row">
+                  <span class="sr-label">IGST ({{ b.rate }}%) on ₹{{ formatAmount(b.taxable_value) }}</span>
+                  <span class="sr-value font-mono">₹{{ formatAmount(b.igst) }}</span>
+                </div>
+              </template>
+            </template>
+          </div>
+
+          <div class="summary-total">
+            <span class="st-label">Total</span>
+            <span class="st-value font-mono">₹{{ formatAmount(liveTotals.total) }}</span>
+          </div>
+
+          <p class="words-total">{{ numberToWords(liveTotals.total) }}</p>
+
+          <button
+            type="submit"
+            form="invoiceForm"
+            class="submit-btn"
+            :disabled="!isFormValid || submitting"
+          >
+            <span v-if="submitting" class="material-symbols-outlined spin-icon">progress_activity</span>
+            <span class="material-symbols-outlined" v-else>check_circle</span>
+            {{ submitting ? (isEditing ? 'Saving…' : 'Creating…') : (isEditing ? 'Save Changes' : 'Create Invoice') }}
+          </button>
+          <button
+            v-if="!isEditing"
+            type="button"
+            class="draft-btn"
+            @click="handleSaveDraft"
+          >
+            <span class="material-symbols-outlined">save</span>
+            Save as Draft
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <ToastNotification v-if="toastMsg" :message="toastMsg" :type="toastType" @done="toastMsg = ''" />
+  </AppLayout>
+</template>
+
+<script setup>
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import AppLayout from '../components/AppLayout.vue'
+import ToastNotification from '../components/ToastNotification.vue'
+import CurrencyInput from '../components/CurrencyInput.vue'
+import TaxIdField from '../components/TaxIdField.vue'
+import { invoicesAPI } from '../api/invoices'
+import { bankAccountsAPI } from '../api/bankAccounts'
+import { projectsAPI } from '../api/projects'
+import { clientsAPI } from '../api/clients'
+import { useInvoiceDrafts, newInvoiceDraftId } from '../composables/useInvoiceDrafts'
+
+const route = useRoute()
+const router = useRouter()
+
+const isEditing = computed(() => !!route.params.id)
+const editingId = computed(() => route.params.id ? Number(route.params.id) : null)
+
+const { saveDraft: saveDraftToStorage, deleteDraft, getDraft } = useInvoiceDrafts()
+const activeDraftId = ref(route.query.draft || null)
+let autoSaveTimer = null
+
+const form = reactive({
+  invoice_type: 'tax',
+  invoice_number: '',
+  invoice_date: new Date().toISOString().split('T')[0],
+  place_of_supply: 'Maharashtra',
+  project_id: null,
+  client_id: null,
+  bill_to_name: '',
+  bill_to_address: '',
+  bill_to_gstin: '',
+  bill_to_pan: '',
+  customer_type: null,
+  ship_to_name: '',
+  ship_to_address: '',
+  ship_to_gstin: '',
+  subject: '',
+  bank_account_id: null,
+  items: [
+    { description: '', hsn_sac: '', amount: 0, tax_rate: 18 }
+  ]
+})
+
+const bulkTaxRate = ref(18)
+function applyBulkTaxRate() {
+  form.items.forEach((i) => { i.tax_rate = bulkTaxRate.value })
+}
+
+const sameAsBillTo = ref(false)
+const projects = ref([])
+const bankAccounts = ref([])
+const selectedClient = ref(null)
+const submitting = ref(false)
+// When on, the invoice subject mirrors the selected project's name and the
+// subject field is locked. When off, the admin types a custom subject.
+const includeProjectAsSubject = ref(true)
+
+// Next invoice number = highest existing trailing number + 1 (e.g. AO-006 -> AO-007).
+function nextInvoiceNumber(invoices) {
+  let max = 0
+  for (const inv of invoices || []) {
+    const m = String(inv.invoice_number || '').match(/(\d+)\s*$/)
+    if (m) max = Math.max(max, parseInt(m[1], 10))
+  }
+  return `AO-${String(max + 1).padStart(3, '0')}`
+}
+
+const toastMsg = ref('')
+const toastType = ref('success')
+
+const showToast = (msg, type = 'success') => {
+  toastMsg.value = msg
+  toastType.value = type
+}
+
+function populateFormFromData(data) {
+  form.invoice_type = data.invoice_type || 'tax'
+  form.invoice_number = data.invoice_number || ''
+  form.invoice_date = data.invoice_date || new Date().toISOString().split('T')[0]
+  form.place_of_supply = data.place_of_supply || ''
+  form.project_id = data.project_id || null
+  form.client_id = data.client_id || null
+  form.bill_to_name = data.bill_to_name || ''
+  form.bill_to_address = data.bill_to_address || ''
+  form.bill_to_gstin = data.bill_to_gstin || ''
+  form.bill_to_pan = data.bill_to_pan || ''
+  form.customer_type = data.customer_type || null
+  syncBillIdType()
+  form.ship_to_name = data.ship_to_name || ''
+  form.ship_to_address = data.ship_to_address || ''
+  form.ship_to_gstin = data.ship_to_gstin || ''
+  form.subject = data.subject || ''
+  form.bank_account_id = data.bank_account_id || null
+  form.items = (data.items || []).map(i => ({
+    description: i.description || '',
+    hsn_sac: i.hsn_sac || '',
+    amount: Number(i.amount) || 0,
+    tax_rate: Number(i.tax_rate) || 18,  // legacy items/drafts pre-date this field
+  }))
+  if (form.items.length === 0) {
+    form.items = [{ description: '', hsn_sac: '', amount: 0, tax_rate: 18 }]
+  }
+}
+
+function getFormSnapshot() {
+  return {
+    invoice_type: form.invoice_type,
+    invoice_number: form.invoice_number,
+    invoice_date: form.invoice_date,
+    place_of_supply: form.place_of_supply,
+    project_id: form.project_id,
+    client_id: form.client_id,
+    bill_to_name: form.bill_to_name,
+    bill_to_address: form.bill_to_address,
+    bill_to_gstin: form.bill_to_gstin,
+    bill_to_pan: form.bill_to_pan,
+    customer_type: form.customer_type,
+    ship_to_name: form.ship_to_name,
+    ship_to_address: form.ship_to_address,
+    ship_to_gstin: form.ship_to_gstin,
+    subject: form.subject,
+    bank_account_id: form.bank_account_id,
+    items: form.items.map(i => ({ ...i })),
+  }
+}
+
+// Has the user actually entered something? Avoids saving blank drafts from the
+// form's defaults (which would clutter the list / overwrite real work).
+function invoiceHasContent() {
+  if (form.bill_to_name || form.project_id || form.invoice_number || form.subject) return true
+  return form.items.some(i => (i.description && i.description.trim()) || Number(i.amount) > 0)
+}
+
+function autoSave() {
+  if (isEditing.value) return
+  if (!invoiceHasContent()) return
+  // Claim the id synchronously so repeated autosaves upsert the same draft.
+  if (!activeDraftId.value) activeDraftId.value = newInvoiceDraftId()
+  saveDraftToStorage(activeDraftId.value, getFormSnapshot())
+}
+
+async function handleSaveDraft() {
+  if (!activeDraftId.value) activeDraftId.value = newInvoiceDraftId()
+  await saveDraftToStorage(activeDraftId.value, getFormSnapshot())
+  showToast('Draft saved')
+}
+
+onMounted(async () => {
+  try {
+    const [pRes, bRes, iRes] = await Promise.all([
+      projectsAPI.getProjects(),
+      bankAccountsAPI.getBankAccounts(),
+      invoicesAPI.getInvoices().catch(() => ({ data: [] })),
+    ])
+    projects.value = pRes.data
+    bankAccounts.value = bRes.data
+
+    // Always pre-select the bank account - default to the only one if just one exists
+    if (!form.bank_account_id && bankAccounts.value.length === 1) {
+      form.bank_account_id = bankAccounts.value[0].id
+    }
+
+    if (isEditing.value && editingId.value) {
+      // Edit mode - load existing invoice
+      const res = await invoicesAPI.getInvoice(editingId.value)
+      const inv = res.data
+      populateFormFromData(inv)
+      // If the saved invoice had no bank account, still auto-select the only one
+      if (!form.bank_account_id && bankAccounts.value.length === 1) {
+        form.bank_account_id = bankAccounts.value[0].id
+      }
+      if (inv.client) {
+        selectedClient.value = inv.client
+      }
+    } else if (activeDraftId.value) {
+      // Resume draft mode
+      const draft = await getDraft(activeDraftId.value)
+      if (draft) {
+        populateFormFromData(draft.data)
+        // Resolve the client from the project
+        if (form.project_id) {
+          const proj = projects.value.find(p => p.id === form.project_id)
+          if (proj?.client) {
+            selectedClient.value = proj.client
+          }
+        }
+        if (!form.bank_account_id && bankAccounts.value.length === 1) {
+          form.bank_account_id = bankAccounts.value[0].id
+        }
+        showToast('Draft restored')
+      }
+    }
+
+    // Fresh create (not editing, no number restored from a draft): prefill the
+    // next invoice number = last invoice number + 1. Admin can still edit it.
+    if (!isEditing.value && !form.invoice_number) {
+      form.invoice_number = nextInvoiceNumber(iRes.data || [])
+    }
+  } catch (err) {
+    showToast('Failed to load required data', 'error')
+  }
+
+  // Auto-save every 10 seconds in create mode
+  if (!isEditing.value) {
+    autoSaveTimer = setInterval(autoSave, 10000)
+  }
+})
+
+onUnmounted(() => {
+  if (autoSaveTimer) clearInterval(autoSaveTimer)
+})
+
+// Watch bill to fields to sync ship to if checked
+watch(
+  () => [form.bill_to_name, form.bill_to_address, form.bill_to_gstin],
+  ([name, addr, gst]) => {
+    if (sameAsBillTo.value) {
+      form.ship_to_name = name
+      form.ship_to_address = addr
+      form.ship_to_gstin = gst
+    }
+  }
+)
+
+const handleSameAsChange = () => {
+  if (sameAsBillTo.value) {
+    form.ship_to_name = form.bill_to_name
+    form.ship_to_address = form.bill_to_address
+    form.ship_to_gstin = form.bill_to_gstin
+  }
+}
+
+function projectDisplayName(proj) {
+  return (proj && (proj.display_name || proj.name)) || ''
+}
+
+// Dropdown selection, decoupled from form.project_id so it can also hold the
+// 'custom' sentinel (a manually-typed, project-less invoice).
+const projectSel = ref(null)
+const customProjectName = ref('')
+const isCustomProject = computed(() => projectSel.value === 'custom')
+
+// Keep the dropdown in sync when project_id is set programmatically (editing an
+// existing invoice or restoring a draft), unless the user is in custom mode.
+watch(() => form.project_id, (id) => {
+  if (projectSel.value !== 'custom') projectSel.value = id || null
+}, { immediate: true })
+
+function onCustomNameInput() {
+  if (includeProjectAsSubject.value) form.subject = customProjectName.value
+}
+
+const onProjectSelect = () => {
+  // Manual entry: no linked project, the typed name feeds the subject line.
+  if (projectSel.value === 'custom') {
+    form.project_id = null
+    selectedClient.value = null
+    form.client_id = null
+    if (includeProjectAsSubject.value) form.subject = customProjectName.value
+    return
+  }
+  form.project_id = projectSel.value || null
+  if (!form.project_id) {
+    selectedClient.value = null
+    form.client_id = null
+    form.subject = ''
+    return
+  }
+  const proj = projects.value.find(p => p.id === form.project_id)
+  if (proj) {
+    if (includeProjectAsSubject.value) form.subject = projectDisplayName(proj)
+    if (proj.client) {
+      selectedClient.value = proj.client
+      form.client_id = proj.client.id
+      form.bill_to_name = proj.client.salutation || proj.client.name
+      form.bill_to_address = proj.client.address || ''
+      form.customer_type = proj.client.customer_type || 'business'
+      form.bill_to_pan = proj.client.pan || ''
+      // Individual clients never carry a GSTIN.
+      form.bill_to_gstin = form.customer_type === 'individual' ? '' : (proj.client.gstin || '')
+      syncBillIdType()
+    } else {
+      selectedClient.value = null
+      form.client_id = null
+    }
+  } else {
+    selectedClient.value = null
+    form.client_id = null
+    form.subject = ''
+  }
+}
+
+// Toggling the switch on snaps the subject to the current project's display name
+// (or the manually-typed name when in custom mode).
+watch(includeProjectAsSubject, (on) => {
+  if (on) {
+    if (isCustomProject.value) {
+      form.subject = customProjectName.value
+    } else {
+      const proj = projects.value.find(p => p.id === form.project_id)
+      form.subject = projectDisplayName(proj)
+    }
+  }
+})
+
+// Explicit choice of what the client is billed against. 'pan' always means
+// CGST+SGST (no GSTIN => intra-state, never IGST); 'gstin' is judged on the
+// GSTIN's state code ("27" = Maharashtra, our home state). This is a deliberate
+// toggle rather than an inference, so a business without GST registration can
+// be billed on PAN without IGST ever creeping in.
+const billIdType = ref('gstin')  // 'gstin' | 'pan'
+
+function setBillIdType(t) {
+  billIdType.value = t
+  // In PAN mode there is no GSTIN - clear it so nothing can trigger IGST,
+  // on this form or in the backend (which keys tax off GSTIN presence).
+  if (t === 'pan') form.bill_to_gstin = ''
+}
+
+// Pick the sensible default whenever a client/invoice loads: PAN when there's
+// no GSTIN to bill against, GSTIN otherwise.
+function syncBillIdType() {
+  billIdType.value = form.bill_to_gstin ? 'gstin' : 'pan'
+}
+
+const taxType = computed(() => {
+  if (billIdType.value === 'pan') return 'CGST_SGST'
+  const gst = form.bill_to_gstin
+  if (gst && gst.length >= 2) return gst.startsWith('27') ? 'CGST_SGST' : 'IGST'
+  return 'CGST_SGST'
+})
+
+const taxTypeIndicator = computed(() => {
+  if (taxType.value === 'CGST_SGST') {
+    return {
+      text: billIdType.value === 'pan'
+        ? 'Tax: CGST + SGST (billed against PAN - no IGST)'
+        : 'Tax: CGST + SGST (split per item bracket)',
+      class: 'indicator-teal',
+    }
+  }
+  return { text: 'Tax: IGST (per item bracket)', class: 'indicator-amber' }
+})
+
+// Groups line items by their tax_rate bracket (8/12/18%) and computes
+// CGST+SGST (half each) or IGST (full rate) per bracket - mirrors
+// calculate_totals() in app/routers/invoices.py exactly, so the live summary
+// always matches what the backend will actually save/print.
+const liveTotals = computed(() => {
+  const subtotal = form.items.reduce((s, i) => s + (Number(i.amount) || 0), 0)
+  const buckets = new Map()
+  for (const i of form.items) {
+    const rate = Number(i.tax_rate) || 18
+    const amt = Number(i.amount) || 0
+    buckets.set(rate, (buckets.get(rate) || 0) + amt)
+  }
+  const breakdown = []
+  let cgst = 0, sgst = 0, igst = 0
+  for (const rate of [...buckets.keys()].sort((a, b) => a - b)) {
+    const taxable = buckets.get(rate)
+    if (taxType.value === 'CGST_SGST') {
+      const half = taxable * (rate / 2) / 100
+      breakdown.push({ rate, taxable_value: taxable, cgst: half, sgst: half, igst: 0 })
+      cgst += half
+      sgst += half
+    } else {
+      const amt = taxable * rate / 100
+      breakdown.push({ rate, taxable_value: taxable, cgst: 0, sgst: 0, igst: amt })
+      igst += amt
+    }
+  }
+  return { subtotal, cgst, sgst, igst, total: subtotal + cgst + sgst + igst, breakdown }
+})
+
+// Rate shown in the compact single-bracket summary display (all items share
+// one rate, or there are no items yet - default to 18%).
+const singleBracketRate = computed(() => liveTotals.value.breakdown[0]?.rate ?? 18)
+
+const isFormValid = computed(() => {
+  if (form.invoice_type === 'tax' && taxType.value !== 'IGST' && !form.invoice_number) return false
+  // A project is required — either a linked one, or a manually-typed name.
+  if (!form.project_id && !(isCustomProject.value && customProjectName.value.trim())) return false
+  if (!form.bill_to_name) return false
+  if (form.items.length === 0) return false
+  const validItems = form.items.filter(i => i.description.trim() !== '' && i.amount > 0)
+  if (validItems.length === 0) return false
+  return true
+})
+
+const addItem = () => {
+  form.items.push({ description: '', hsn_sac: '', amount: 0 })
+}
+
+const removeItem = (idx) => {
+  if (form.items.length > 1) form.items.splice(idx, 1)
+}
+
+const formatAmount = (val) => {
+  return Number(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function numberToWords(amount) {
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five',
+    'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven',
+    'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
+    'Seventeen', 'Eighteen', 'Nineteen']
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty',
+    'Sixty', 'Seventy', 'Eighty', 'Ninety']
+
+  function wordsUnderThousand(n) {
+    if (n === 0) return ''
+    if (n < 20) return ones[n]
+    if (n < 100) return tens[Math.floor(n/10)] + (n%10 ? ' ' + ones[n%10] : '')
+    return ones[Math.floor(n/100)] + ' Hundred' + (n%100 ? ' ' + wordsUnderThousand(n%100) : '')
+  }
+
+  let n = Math.floor(amount)
+  if (n === 0) return 'Zero Rupees Only'
+
+  const crore = Math.floor(n / 10000000); n %= 10000000
+  const lakh = Math.floor(n / 100000); n %= 100000
+  const thousand = Math.floor(n / 1000); n %= 1000
+  const rest = n
+
+  const parts = []
+  if (crore) parts.push(wordsUnderThousand(crore) + ' Crore')
+  if (lakh) parts.push(wordsUnderThousand(lakh) + ' Lakh')
+  if (thousand) parts.push(wordsUnderThousand(thousand) + ' Thousand')
+  if (rest) parts.push(wordsUnderThousand(rest))
+
+  return 'Indian Rupee ' + parts.join(' ') + ' Only'
+}
+
+const submitInvoice = async () => {
+  if (!isFormValid.value) return
+  submitting.value = true
+  const payload = { ...form }
+  payload.items = payload.items.filter(i => i.description.trim() !== '')
+  try {
+    if (isEditing.value) {
+      await invoicesAPI.updateInvoice(editingId.value, payload)
+      showToast('Invoice updated successfully!')
+      setTimeout(() => { router.push(`/admin/invoices/${editingId.value}`) }, 1000)
+    } else {
+      // Delete the draft on successful creation
+      if (autoSaveTimer) clearInterval(autoSaveTimer)
+      if (activeDraftId.value) {
+        await deleteDraft(activeDraftId.value)
+        activeDraftId.value = null
+      }
+      await invoicesAPI.createInvoice(payload)
+      showToast('Invoice created successfully!')
+      setTimeout(() => { router.push('/admin/invoices') }, 1000)
+    }
+  } catch (err) {
+    showToast(err.response?.data?.detail || 'Failed to save invoice', 'error')
+    submitting.value = false
+  }
+}
+</script>
+
+<style scoped>
+/* ── Page Header ── */
+.page-header {
+  margin-bottom: 28px;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.back-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-outline);
+  background: var(--color-surface);
+  color: var(--color-on-surface-variant);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.back-btn:hover { background: var(--color-surface-dim); }
+.back-btn .material-symbols-outlined { font-size: 20px; }
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--color-on-surface);
+  margin: 0 0 2px;
+  letter-spacing: -0.01em;
+}
+.page-subtitle { margin: 0; font-size: 13px; color: var(--color-on-surface-variant); }
+
+/* ── Layout ── */
+.invoice-layout {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+}
+
+.form-card {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-xl);
+  padding: 32px;
+  box-shadow: var(--shadow-sm);
+}
+
+.form-sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 88px;
+}
+
+/* ── Form Sections ── */
+.form-section {
+  margin-bottom: 32px;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--color-outline);
+}
+.form-section:last-child {
+  margin-bottom: 0; padding-bottom: 0; border-bottom: none;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.section-number {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+  border-radius: var(--radius-md);
+  padding: 3px 8px;
+}
+.section-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 800;
+  margin: 0;
+  color: var(--color-on-surface);
+}
+
+/* ── Invoice Type Toggles ── */
+.type-toggles {
+  display: flex;
+  gap: 12px;
+}
+.type-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 16px;
+  border: 2px solid var(--color-outline);
+  background: var(--color-surface-dim);
+  border-radius: var(--radius-xl);
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.type-btn.active {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.type-icon { font-size: 22px; color: inherit; }
+.type-label {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: inherit;
+}
+
+/* ── Form Fields ── */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 14px;
+}
+.form-group:last-child { margin-bottom: 0; }
+
+/* GSTIN / PAN segmented toggle */
+.idtype-toggle { display: inline-flex; border: 1px solid var(--color-outline); border-radius: var(--radius-md); overflow: hidden; width: fit-content; }
+.idtype-toggle button {
+  padding: 7px 18px; border: none; background: var(--color-surface); cursor: pointer;
+  font-size: 12px; font-weight: 700; color: var(--color-on-surface-variant); transition: background .15s, color .15s;
+}
+.idtype-toggle button + button { border-left: 1px solid var(--color-outline); }
+.idtype-toggle button.active { background: var(--color-primary); color: #fff; }
+.idtype-hint {
+  display: flex; align-items: center; gap: 5px; margin: 4px 0 0;
+  font-size: 11px; color: #059669;
+}
+.idtype-hint .material-symbols-outlined { font-size: 14px; }
+
+.form-group label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-surface-variant);
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  padding: 10px 12px;
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-on-surface);
+  background: #fff;
+  resize: vertical;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(40,116,117,0.1);
+}
+.form-group input:disabled,
+.form-group textarea:disabled {
+  background: var(--color-surface-dim);
+  color: var(--color-on-surface-variant);
+  cursor: not-allowed;
+}
+
+.row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.mt-12 { margin-top: 12px; }
+.mt-16 { margin-top: 16px; }
+.mt-8  { margin-top: 8px; }
+
+.custom-proj-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+}
+.custom-proj-note .material-symbols-outlined { font-size: 15px; }
+
+/* ── Client Chip ── */
+.client-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--color-surface-dim);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  color: var(--color-on-surface);
+}
+.chip-icon { font-size: 16px; color: var(--color-primary); }
+
+/* ── Tax Badge ── */
+.tax-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+}
+.indicator-teal { background: var(--color-primary-light); color: var(--color-primary); }
+.indicator-amber { background: #fff8e1; color: #b45309; }
+
+/* ── Billing Grid ── */
+.billing-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+}
+.col-label {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-on-surface-variant);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-outline);
+}
+.col-label--flex {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.same-as-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-on-surface-variant);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+/* ── Bulk tax bar ── */
+.bulk-tax-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: var(--color-surface-dim);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-lg);
+}
+.bulk-tax-label { font-size: 12px; font-weight: 600; color: var(--color-on-surface-variant); }
+.bulk-tax-select {
+  padding: 6px 10px;
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  background: #fff;
+}
+.bulk-tax-btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.bulk-tax-btn:hover { opacity: 0.88; }
+
+/* ── Items Table ── */
+.items-table-wrap {
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.items-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.items-table th {
+  background: var(--color-surface-dim);
+  padding: 9px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-on-surface-variant);
+  text-align: left;
+  border-bottom: 1px solid var(--color-outline);
+}
+.items-table td {
+  padding: 7px 6px;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--color-outline);
+}
+.item-row:last-child td { border-bottom: none; }
+.idx-cell { text-align: center; font-size: 11px; color: var(--color-on-surface-variant); padding: 0 4px; }
+.text-center { text-align: center; }
+
+.items-table input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  font-size: 13px;
+  background: transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.items-table input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(40,116,117,0.1);
+}
+.items-table select {
+  width: 100%;
+  padding: 8px 6px;
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  font-size: 13px;
+  background: #fff;
+}
+.items-table select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(40,116,117,0.1);
+}
+
+.remove-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-on-surface-variant);
+  padding: 4px;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  transition: background 0.15s, color 0.15s;
+}
+.remove-btn:hover:not(:disabled) { background: #fef2f2; color: var(--color-error); }
+.remove-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.remove-btn .material-symbols-outlined { font-size: 17px; }
+
+.add-item-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.add-item-btn:hover { text-decoration: underline; }
+.add-item-btn .material-symbols-outlined { font-size: 16px; }
+
+/* ── Bank Warning ── */
+.bank-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 16px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-lg);
+  font-size: 13px;
+  color: #92400e;
+}
+.bank-warning .material-symbols-outlined { font-size: 18px; }
+.bank-warning a { color: #92400e; font-weight: 700; text-decoration: none; }
+.bank-warning a:hover { text-decoration: underline; }
+
+/* ── Summary Card ── */
+.summary-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-xl);
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+}
+.summary-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 800;
+  margin: 0 0 16px;
+  color: var(--color-on-surface);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-outline);
+}
+.summary-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.sr-label { font-size: 13px; color: var(--color-on-surface-variant); }
+.sr-value { font-size: 13px; color: var(--color-on-surface); }
+
+.summary-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  margin-top: 8px;
+  border-top: 2px solid var(--color-outline);
+}
+.st-label { font-size: 15px; font-weight: 700; color: var(--color-on-surface); }
+.st-value {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--color-on-surface);
+}
+
+.font-mono { font-family: 'Courier New', Courier, monospace; }
+
+.words-total {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--color-on-surface-variant);
+  line-height: 1.5;
+  margin: 12px 0 0;
+}
+
+.submit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  margin-top: 20px;
+  padding: 12px;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-lg);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: opacity 0.18s;
+  box-shadow: 0 2px 8px rgba(40,116,117,0.2);
+}
+.submit-btn:hover:not(:disabled) { opacity: 0.88; }
+.submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.submit-btn .material-symbols-outlined { font-size: 18px; }
+
+/* ── Draft Button ── */
+.draft-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-lg);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.draft-btn:hover { background: var(--color-surface-dim); }
+.draft-btn .material-symbols-outlined { font-size: 17px; color: var(--color-on-surface-variant); }
+
+/* ── Spinner ── */
+.spin-icon { animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 900px) {
+  .invoice-layout { flex-direction: column; }
+  .form-sidebar { width: 100%; position: static; }
+  .billing-grid { grid-template-columns: 1fr; }
+  .row-2 { grid-template-columns: 1fr; }
+  .type-toggles { flex-direction: column; }
+  .items-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .items-table { min-width: 480px; }
+  .form-card { padding: 18px; }
+}
+</style>
