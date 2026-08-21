@@ -73,13 +73,21 @@
       <div v-if="modalOpen" class="modal-backdrop">
         <div class="modal modal-wide">
           <div class="modal-header">
-            <h3 class="modal-title">{{ isEditing ? 'Edit Client' : 'Add New Client' }}</h3>
+            <div class="mh-left">
+              <span class="mh-badge material-symbols-outlined">{{ isEditing ? 'edit' : 'person_add' }}</span>
+              <div>
+                <h3 class="modal-title">{{ isEditing ? 'Edit Client' : 'Add New Client' }}</h3>
+                <p class="modal-subtitle">
+                  {{ isEditing ? 'Update this client’s billing details' : 'Create a client to bill and assign to projects' }}
+                </p>
+              </div>
+            </div>
             <button class="modal-close" @click="closeModal">
               <span class="material-symbols-outlined">close</span>
             </button>
           </div>
 
-          <form @submit.prevent="handleSubmit" class="modal-body">
+          <form @submit.prevent="handleSubmit" class="modal-body client-form">
             <!-- Draft restore banner -->
             <div v-if="showDraftBanner" class="draft-banner">
               <span class="material-symbols-outlined">history</span>
@@ -88,105 +96,133 @@
               <button type="button" class="draft-discard-btn" @click="discardClientDraft">Discard</button>
             </div>
 
-            <!-- Customer Type -->
-            <div class="form-field span-2" style="margin-bottom: 18px;">
-              <label>Customer Type</label>
-              <div class="type-toggles">
-                <button
-                  type="button"
-                  class="type-toggle-btn"
-                  :class="{ active: form.customer_type === 'business' }"
-                  @click="form.customer_type = 'business'"
-                >
-                  <span class="material-symbols-outlined">apartment</span>
-                  Business
-                </button>
-                <button
-                  type="button"
-                  class="type-toggle-btn"
-                  :class="{ active: form.customer_type === 'individual' }"
-                  @click="onSelectIndividual"
-                >
-                  <span class="material-symbols-outlined">person</span>
-                  Individual
-                </button>
-              </div>
+            <!-- Customer Type — segmented control -->
+            <div class="ct-segment">
+              <button
+                type="button"
+                class="ct-option"
+                :class="{ active: form.customer_type === 'business' }"
+                @click="form.customer_type = 'business'"
+              >
+                <span class="ct-icon material-symbols-outlined">apartment</span>
+                <span class="ct-text">
+                  <span class="ct-name">Business</span>
+                  <span class="ct-hint">Company, billed with a GSTIN</span>
+                </span>
+                <span class="ct-check material-symbols-outlined">check_circle</span>
+              </button>
+              <button
+                type="button"
+                class="ct-option"
+                :class="{ active: form.customer_type === 'individual' }"
+                @click="onSelectIndividual"
+              >
+                <span class="ct-icon material-symbols-outlined">person</span>
+                <span class="ct-text">
+                  <span class="ct-name">Individual</span>
+                  <span class="ct-hint">Person, billed with a PAN</span>
+                </span>
+                <span class="ct-check material-symbols-outlined">check_circle</span>
+              </button>
             </div>
 
-            <div class="form-grid">
-              <!-- Name -->
-              <div class="form-field">
-                <label>Name *</label>
-                <input v-model="form.name" type="text" required placeholder="e.g. ABC Corp" />
+            <!-- Identity -->
+            <section class="fsection">
+              <div class="fsection-head"><span class="material-symbols-outlined">badge</span> Identity</div>
+              <div class="form-grid">
+                <div class="form-field">
+                  <label>Name <span class="req">*</span></label>
+                  <input
+                    v-model="form.name"
+                    type="text"
+                    required
+                    :placeholder="form.customer_type === 'individual' ? 'e.g. Rahul Sharma' : 'e.g. ABC Corp'"
+                  />
+                </div>
+                <div class="form-field">
+                  <div class="label-row">
+                    <label>Invoice Display Name</label>
+                    <label class="switch-check">
+                      <input type="checkbox" v-model="sameAsClientName" />
+                      <span class="switch-track"><span class="switch-thumb"></span></span>
+                      <span class="switch-text">Same as name</span>
+                    </label>
+                  </div>
+                  <input
+                    v-model="form.salutation"
+                    type="text"
+                    :disabled="sameAsClientName"
+                    :placeholder="form.name || 'Name shown on invoices'"
+                  />
+                </div>
               </div>
-              <!-- Salutation / display name -->
-              <div class="form-field">
-                <label>
-                  Invoice Display Name
-                  <label class="inline-check">
-                    <input type="checkbox" v-model="sameAsClientName" />
-                    Same as name
-                  </label>
-                </label>
-                <input
-                  v-model="form.salutation"
-                  type="text"
-                  :disabled="sameAsClientName"
-                  :placeholder="form.name || 'Name shown on invoices'"
-                />
-              </div>
-              <!-- Email -->
-              <div class="form-field">
-                <label>Email</label>
-                <input v-model="form.email" type="email" placeholder="client@example.com" />
-              </div>
-              <!-- Phone -->
-              <div class="form-field">
-                <label>Phone</label>
-                <input v-model="form.phone" type="tel" placeholder="+91 9876543210" />
-              </div>
+            </section>
 
-              <!-- GSTIN (business only) -->
-              <div v-if="form.customer_type === 'business'" class="form-field">
-                <label>GSTIN</label>
-                <TaxIdField v-model="form.gstin" kind="gstin" placeholder="e.g. 27AAAAA0000A1Z5" />
+            <!-- Contact -->
+            <section class="fsection">
+              <div class="fsection-head"><span class="material-symbols-outlined">alternate_email</span> Contact</div>
+              <div class="form-grid">
+                <div class="form-field">
+                  <label>Email</label>
+                  <input v-model="form.email" type="email" placeholder="client@example.com" />
+                </div>
+                <div class="form-field">
+                  <label>Phone</label>
+                  <input v-model="form.phone" type="tel" placeholder="+91 9876543210" />
+                </div>
               </div>
-              <!-- PAN (always; required for individuals) -->
-              <div class="form-field">
-                <label>PAN {{ form.customer_type === 'individual' ? '*' : '' }}</label>
-                <TaxIdField
-                  v-model="form.pan"
-                  kind="pan"
-                  placeholder="e.g. AAAAA9999A"
-                  :required="form.customer_type === 'individual'"
-                />
-              </div>
+            </section>
 
-              <!-- Structured address -->
-              <div class="form-field span-2">
-                <label>Address Line 1</label>
-                <input v-model="form.address_line1" type="text" placeholder="Building, street" />
+            <!-- Tax details -->
+            <section class="fsection">
+              <div class="fsection-head"><span class="material-symbols-outlined">receipt_long</span> Tax details</div>
+              <div class="form-grid">
+                <div v-if="form.customer_type === 'business'" class="form-field">
+                  <label>GSTIN</label>
+                  <TaxIdField v-model="form.gstin" kind="gstin" placeholder="e.g. 27AAAAA0000A1Z5" />
+                  <span class="field-hint">PAN is auto-filled from a valid GSTIN.</span>
+                </div>
+                <div class="form-field">
+                  <label>PAN <span v-if="form.customer_type === 'individual'" class="req">*</span></label>
+                  <TaxIdField
+                    v-model="form.pan"
+                    kind="pan"
+                    placeholder="e.g. AAAAA9999A"
+                    :required="form.customer_type === 'individual'"
+                  />
+                </div>
               </div>
-              <div class="form-field span-2">
-                <label>Address Line 2</label>
-                <input v-model="form.address_line2" type="text" placeholder="Area, landmark (optional)" />
+            </section>
+
+            <!-- Address -->
+            <section class="fsection">
+              <div class="fsection-head"><span class="material-symbols-outlined">location_on</span> Address</div>
+              <div class="form-grid">
+                <div class="form-field span-2">
+                  <label>Address Line 1</label>
+                  <input v-model="form.address_line1" type="text" placeholder="Building, street" />
+                </div>
+                <div class="form-field span-2">
+                  <label>Address Line 2</label>
+                  <input v-model="form.address_line2" type="text" placeholder="Area, landmark (optional)" />
+                </div>
+                <div class="form-field">
+                  <label>City</label>
+                  <input v-model="form.city" type="text" placeholder="e.g. Mumbai" />
+                </div>
+                <div class="form-field">
+                  <label>State</label>
+                  <input v-model="form.state" type="text" list="indian-states" placeholder="e.g. Maharashtra" />
+                  <datalist id="indian-states">
+                    <option v-for="s in indianStates" :key="s" :value="s" />
+                  </datalist>
+                </div>
+                <div class="form-field">
+                  <label>Pincode</label>
+                  <input v-model="form.pincode" type="text" maxlength="6" placeholder="e.g. 400001" />
+                </div>
               </div>
-              <div class="form-field">
-                <label>City</label>
-                <input v-model="form.city" type="text" placeholder="e.g. Mumbai" />
-              </div>
-              <div class="form-field">
-                <label>State</label>
-                <input v-model="form.state" type="text" list="indian-states" placeholder="e.g. Maharashtra" />
-                <datalist id="indian-states">
-                  <option v-for="s in indianStates" :key="s" :value="s" />
-                </datalist>
-              </div>
-              <div class="form-field">
-                <label>Pincode</label>
-                <input v-model="form.pincode" type="text" maxlength="6" placeholder="e.g. 400001" />
-              </div>
-            </div>
+            </section>
 
             <div v-if="formError" class="form-error">
               <span class="material-symbols-outlined">error</span>
@@ -696,6 +732,27 @@ async function handleDelete() {
   margin: 0;
   letter-spacing: -0.01em;
 }
+.mh-left { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.mh-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: var(--radius-lg);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: 22px;
+}
+.modal-subtitle {
+  margin: 2px 0 0;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+  line-height: 1.35;
+}
 .modal-close {
   display: flex;
   align-items: center;
@@ -738,25 +795,124 @@ form .modal-footer {
   border-radius: 0;
 }
 
-/* ─── Type toggle ─── */
-.type-toggles { display: flex; gap: 10px; margin-top: 4px; }
-.type-toggle-btn {
+/* ─── Customer-type segmented control ─── */
+.ct-segment {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.ct-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  text-align: left;
+  border: 1.5px solid var(--color-outline);
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
+}
+.ct-option:hover { border-color: var(--color-outline-strong); }
+.ct-option.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+.ct-icon {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 9px 16px;
-  border: 1.5px solid var(--color-outline);
-  background: var(--color-surface-dim);
-  border-radius: var(--radius-lg);
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 600;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-container);
   color: var(--color-on-surface-variant);
-  cursor: pointer;
-  transition: all 0.15s;
+  font-size: 20px;
+  transition: background var(--transition), color var(--transition);
 }
-.type-toggle-btn.active { background: var(--color-primary-light); border-color: var(--color-primary); color: var(--color-primary); }
-.type-toggle-btn .material-symbols-outlined { font-size: 17px; }
+.ct-option.active .ct-icon { background: var(--color-primary); color: #fff; }
+.ct-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ct-name { font-family: var(--font-body); font-size: 14px; font-weight: 700; color: var(--color-on-surface); }
+.ct-hint { font-family: var(--font-body); font-size: 11.5px; font-weight: 500; color: var(--color-on-surface-variant); }
+.ct-check {
+  margin-left: auto;
+  font-size: 20px;
+  color: var(--color-primary);
+  opacity: 0;
+  transform: scale(0.7);
+  transition: opacity var(--transition), transform var(--transition);
+}
+.ct-option.active .ct-check { opacity: 1; transform: scale(1); }
+
+/* ─── Form sections ─── */
+.fsection { margin-bottom: 22px; }
+.fsection:last-of-type { margin-bottom: 0; }
+.fsection-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 13px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--color-outline-variant);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--color-on-surface-2);
+}
+.fsection-head .material-symbols-outlined { font-size: 16px; color: var(--color-primary); }
+
+.req { color: var(--color-error); font-weight: 700; }
+.field-hint { margin-top: 5px; font-size: 11px; color: var(--color-on-surface-variant); }
+
+/* Invoice-name label row + "same as name" switch */
+.label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.form-field label.switch-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.switch-check input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  background: var(--color-outline-strong);
+  transition: background var(--transition);
+}
+.switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--shadow-xs);
+  transition: transform var(--transition);
+}
+.switch-check input:checked + .switch-track { background: var(--color-primary); }
+.switch-check input:checked + .switch-track .switch-thumb { transform: translateX(14px); }
+.switch-check input:focus-visible + .switch-track { box-shadow: 0 0 0 3px var(--color-primary-light); }
+.switch-text {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-on-surface-variant);
+}
 
 /* ─── Form ─── */
 .form-grid {
@@ -782,19 +938,6 @@ form .modal-footer {
   align-items: center;
   justify-content: space-between;
 }
-.inline-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 600;
-  font-size: 11px;
-  color: var(--color-on-surface-variant);
-  cursor: pointer;
-}
-.inline-check input { width: auto; height: auto; margin: 0; }
-
 .form-field input,
 .form-field textarea {
   padding: 8px 12px;
