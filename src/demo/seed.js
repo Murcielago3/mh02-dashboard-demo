@@ -34,8 +34,10 @@ function makeSeq() {
   }
 }
 
-export function seedDemo(db) {
-  resetRng()
+export function seedDemo(db, seed) {
+  // No seed -> resetRng() uses its fixed default (the rehearsed opening set).
+  // A seed (passed on an explicit reset) reshuffles every figure below.
+  resetRng(seed)
   const id = makeSeq()
   const r2 = (n) => Math.round(n * 100) / 100
 

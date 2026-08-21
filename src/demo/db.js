@@ -6,8 +6,16 @@ import { reactive, watch } from 'vue'
 import { seedDemo } from './seed'
 
 const STORAGE_KEY = 'mh02_demo_db'
+// One-shot seed left behind by a reset so the post-reload reseed produces a
+// visibly different dataset (the first-ever load has none -> rehearsed default).
+const RESEED_KEY = 'mh02_demo_reseed'
 // Bump whenever the seed/store shape changes -> old persisted data is discarded.
 export const SEED_VERSION = 1
+
+// A fresh 32-bit seed for a regenerated dataset.
+function randomSeed() {
+  return (Math.floor(Math.random() * 0xffffffff)) >>> 0
+}
 
 function emptyShape() {
   return {
@@ -55,7 +63,17 @@ function load() {
     }
   } catch { /* corrupt / unavailable -> reseed */ }
   const fresh = emptyShape()
-  seedDemo(fresh)
+  // A reset drops a one-shot random seed here so the regenerated data looks
+  // different; consume it so subsequent plain reloads stay stable.
+  let seed
+  try {
+    const pending = localStorage.getItem(RESEED_KEY)
+    if (pending != null) {
+      seed = Number(pending) >>> 0
+      localStorage.removeItem(RESEED_KEY)
+    }
+  } catch { /* storage unavailable -> rehearsed default */ }
+  seedDemo(fresh, seed)
   return fresh
 }
 
@@ -91,20 +109,24 @@ export function nextId(entity) {
   return id
 }
 
-// Wipe + reseed from scratch (Reset button). Reloads so no stale reactive
-// state or mounted-chart geometry survives.
+// Wipe + regenerate from scratch (Reset button). Leaves a one-shot random seed
+// so the reloaded dataset is visibly different (not the identical rehearsed set
+// every time), then reloads so no stale reactive state or mounted-chart
+// geometry survives.
 export function resetDemo() {
   try {
+    localStorage.setItem(RESEED_KEY, String(randomSeed()))
     localStorage.removeItem(STORAGE_KEY)
   } catch { /* ignore */ }
   window.location.reload()
 }
 
-// Force a fresh seed into the live store without a reload (used by "Run demo
-// data" when the store is empty or the user wants a clean set mid-session).
+// Force a fresh, differently-seeded dataset into the live store without a reload
+// (used by "Run demo data" when the store is empty or the user wants a clean
+// set mid-session).
 export function reseedInPlace() {
   const fresh = emptyShape()
-  seedDemo(fresh)
+  seedDemo(fresh, randomSeed())
   Object.keys(fresh).forEach((k) => {
     db[k] = fresh[k]
   })
