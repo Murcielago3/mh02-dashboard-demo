@@ -15,11 +15,11 @@
           <h2 class="brand-title">Studio<br />MH 02</h2>
           <div class="brand-divider"></div>
           <p class="brand-tagline">
-            Precision-engineered studio suite for high-performance enterprise resource planning.
+            Demo version — sample data only, nothing is saved to a server.
           </p>
         </div>
             <div class="stat-value">v1.0.0</div>
-            <div class="stat-label">Build Release</div>
+            <div class="stat-label">Demo Release</div>
         <!-- Stats Indicators -->
         <div class="stats-row">
           <div>
